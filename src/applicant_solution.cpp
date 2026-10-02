@@ -117,7 +117,7 @@ std::sort(
     [](const std::pair<int, Coord>& a,
        const std::pair<int, Coord>& b)
     {
-        return a.first > b.first;       //sort the paths the same way we sorted the ants
+        return a.first < b.first;       //sort the paths the same way we sorted the ants
     }
 );
 
