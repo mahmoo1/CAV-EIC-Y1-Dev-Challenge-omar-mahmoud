@@ -11,12 +11,34 @@
 static bool initialCycle = true;
 static std::vector<int> searchers;
 static std::vector<int> collectors;
-static std::vector<Coord> scanTargets;
+
 static std::vector<Coord> knownFood;
 static int forageCycle = 0;
+static bool pendingRelay = false;
+static Coord pendingRelayFood = {-1, -1};
+
+struct FoodAssignment
+{
+    int antIndex;
+    int foodIndex;
+    int cost;
+};
+struct RelayAssignment
+{
+    int antIndex;
+    int foodIndex;
+    int costToFood;
+    int energyAfterPickup;
+};
 
 
 void AntWorld::forage() {
+
+if (this->ants.empty())
+{
+    return;
+}
+
 if (initialCycle)
 {
 std::vector<std::pair<int, int>> energyRank; //create a vector to store the energies of the ant colony, before sorting them
@@ -68,13 +90,7 @@ for (int i = 0; i < colZones; i++)
 
     scanCols.push_back((start + end) / 2);
 }
-for (int row : scanRows)
-{
-    for (int col : scanCols)
-    {
-        scanTargets.push_back({row, col});
-    }
-}
+
 
 std::vector<std::pair<int, Coord>> targetCosts; 
 
@@ -104,6 +120,12 @@ std::sort(
         return a.first > b.first;       //sort the paths the same way we sorted the ants
     }
 );
+
+if (targetCosts.empty())
+{
+    initialCycle = false;
+    return;
+}
 
 for (int i = 0; i < searchers.size(); i++)
 {
@@ -180,7 +202,7 @@ return;
 
 forageCycle++;
 
-if (forageCycle <= 5)
+if (forageCycle <= 10)
 {
     std::cout << "\n--- FORAGE CYCLE " << forageCycle << " ---\n";
     std::cout << "Living ants: " << this->ants.size() << std::endl;
@@ -188,99 +210,139 @@ if (forageCycle <= 5)
     std::cout << "Score: " << this->score << std::endl;
 }
 //RETREIVAL SECTION POST INITIALIZATION 
-std::vector<std::pair<int, int>> currentEnergyRank;
 
+if (pendingRelay)
+{
+    std::cout << "Adding relayed food at ("
+              << pendingRelayFood.first << ","
+              << pendingRelayFood.second << ")"
+              << std::endl;
+    bool alreadyKnown = false;
+
+    for (Coord food : knownFood)
+    {
+        if (food == pendingRelayFood)
+        {
+            alreadyKnown = true;
+            break;
+        }
+    }
+
+    if (!alreadyKnown)
+    {
+        knownFood.push_back(pendingRelayFood);
+    }
+
+    pendingRelay = false;
+    // Any ant already carrying food should prioritize returning it home
 for (int i = 0; i < this->ants.size(); i++)
 {
-    currentEnergyRank.push_back(
-        {this->ants[i].energy, i}
-    );
-}
-
-std::sort(
-    currentEnergyRank.begin(),
-    currentEnergyRank.end(),
-    [](const std::pair<int, int>& a,
-       const std::pair<int, int>& b)
+    if (this->ants[i].carryingFood)
     {
-        return a.first > b.first;
+        this->ants[i].returnHome(
+            this->terrainMap,
+            this->foodMap
+        );
     }
-);
-
-for (const std::pair<int, int>& rankedAnt : currentEnergyRank)
-{
-    int antIndex = rankedAnt.second;
-    Ant& ant = this->ants[antIndex];
-
-    if (ant.carryingFood)
-{
-    ant.returnHome(
-        this->terrainMap,
-        this->foodMap
-    );
-
-    continue;
 }
-if (knownFood.empty())
-{
-    std::cout << "Known food available: "
+    std::cout << "Known food after relay update: "
           << knownFood.size() << std::endl;
-    continue;
 }
-int bestFoodIndex = -1;
-int bestCost = -1;
-for (int i = 0; i < knownFood.size(); i++)
+
+
+std::vector<FoodAssignment> possibleAssignments;
+
+for (int antIndex = 0; antIndex < this->ants.size(); antIndex++)
 {
-    Coord foodTarget = knownFood[i];
-
-    std::vector<Coord> pathToFood =
-        shortestPath(
-            this->terrainMap,
-            ant.position,
-            foodTarget
-        );
-
-    int costToFood =
-        calculatePathCost(
-            this->terrainMap,
-            pathToFood
-        );
-
-    std::vector<Coord> pathHome =
-        shortestPath(
-            this->terrainMap,
-            foodTarget,
-            this->homeCoordinates
-        );
-
-    int costHome =
-        calculatePathCost(
-            this->terrainMap,
-            pathHome
-        );
-
-    int totalCost = costToFood + costHome;
-
-    if (totalCost <= ant.energy)
+    Ant& ant = this->ants[antIndex];
+    if (ant.carryingFood)
     {
-        if (bestFoodIndex == -1 || totalCost < bestCost)
+    continue;
+    }
+
+    for (int foodIndex = 0; foodIndex < knownFood.size(); foodIndex++)
+    {
+        Coord foodTarget = knownFood[foodIndex];
+
+        std::vector<Coord> pathToFood =
+            shortestPath(
+                this->terrainMap,
+                ant.position,
+                foodTarget
+            );
+
+        int costToFood =
+            calculatePathCost(
+                this->terrainMap,
+                pathToFood
+            );
+
+        std::vector<Coord> pathHome =
+            shortestPath(
+                this->terrainMap,
+                foodTarget,
+                this->homeCoordinates
+            );
+
+        int costHome =
+            calculatePathCost(
+                this->terrainMap,
+                pathHome
+            );
+
+        int totalCost = costToFood + costHome;
+
+        if (ant.energy >= totalCost)
         {
-            bestFoodIndex = i;
-            bestCost = totalCost;
+            possibleAssignments.push_back(
+                {antIndex, foodIndex, totalCost}
+            );
         }
     }
 }
-if (bestFoodIndex != -1)
-{
-    Coord foodTarget = knownFood[bestFoodIndex];
+std::sort(
+    possibleAssignments.begin(),
+    possibleAssignments.end(),
+    [](const FoodAssignment& a, const FoodAssignment& b)
+    {
+        return a.cost < b.cost;
+    }
+);
 
-    if (forageCycle <= 5)
+std::vector<bool> antAssigned(this->ants.size(), false);
+std::vector<bool> foodAssigned(knownFood.size(), false);
+
+std::vector<FoodAssignment> selectedAssignments;
+
+for (const FoodAssignment& assignment : possibleAssignments)
+{
+    int antIndex = assignment.antIndex;
+    int foodIndex = assignment.foodIndex;
+
+    if (!antAssigned[antIndex] && !foodAssigned[foodIndex])
+    {
+        selectedAssignments.push_back(assignment);
+
+        antAssigned[antIndex] = true;
+        foodAssigned[foodIndex] = true;
+    }
+}
+
+for (const FoodAssignment& assignment : selectedAssignments)
+{
+    int antIndex = assignment.antIndex;
+    int foodIndex = assignment.foodIndex;
+
+    Ant& ant = this->ants[antIndex];
+    Coord foodTarget = knownFood[foodIndex];
+
+    if (forageCycle <= 10)
     {
         std::cout << "Ant " << antIndex
                   << " energy=" << ant.energy
                   << " retrieving (" << foodTarget.first
                   << "," << foodTarget.second << ")"
-                  << " bestCost=" << bestCost
+                  << " globalCost=" << assignment.cost
                   << std::endl;
     }
 
@@ -294,12 +356,164 @@ if (bestFoodIndex != -1)
         this->terrainMap,
         this->foodMap
     );
+}
 
-    knownFood.erase(
-        knownFood.begin() + bestFoodIndex
+if (selectedAssignments.empty() && !knownFood.empty())
+{
+    std::vector<RelayAssignment> relayOptions;
+        for (int antIndex = 0; antIndex < this->ants.size(); antIndex++)
+    {
+        Ant& ant = this->ants[antIndex];
+
+        if (ant.carryingFood)
+        {
+            continue;
+        }
+
+        for (int foodIndex = 0; foodIndex < knownFood.size(); foodIndex++)
+        {
+            Coord foodTarget = knownFood[foodIndex];
+
+            std::vector<Coord> pathToFood =
+                shortestPath(
+                    this->terrainMap,
+                    ant.position,
+                    foodTarget
+                );
+
+            int costToFood =
+                calculatePathCost(
+                    this->terrainMap,
+                    pathToFood
+                );
+
+            // The ant must at least be able to REACH the food.
+            if (costToFood <= ant.energy)
+            {
+                int energyAfterPickup =
+                    ant.energy - costToFood;
+
+                // Must have energy left to actually move the food.
+                if (energyAfterPickup > 0)
+                {
+                    relayOptions.push_back(
+                        {
+                            antIndex,
+                            foodIndex,
+                            costToFood,
+                            energyAfterPickup
+                        }
+                    );
+                }
+            }
+        }
+    }
+
+    if (relayOptions.empty() && forageCycle <= 10)
+{
+    std::cout << "\n--- NO RELAY POSSIBLE ---\n";
+
+    for (int antIndex = 0; antIndex < this->ants.size(); antIndex++)
+    {
+        Ant& ant = this->ants[antIndex];
+
+        int cheapestFoodCost = -1;
+        Coord cheapestFood = {-1, -1};
+
+        for (int foodIndex = 0; foodIndex < knownFood.size(); foodIndex++)
+        {
+            std::vector<Coord> path =
+                shortestPath(
+                    this->terrainMap,
+                    ant.position,
+                    knownFood[foodIndex]
+                );
+
+            int cost =
+                calculatePathCost(
+                    this->terrainMap,
+                    path
+                );
+
+            if (cheapestFoodCost == -1 || cost < cheapestFoodCost)
+            {
+                cheapestFoodCost = cost;
+                cheapestFood = knownFood[foodIndex];
+            }
+        }
+
+        std::cout << "Ant " << antIndex
+                  << " | energy=" << ant.energy
+                  << " | cheapest reachable food cost="
+                  << cheapestFoodCost
+                  << " at (" << cheapestFood.first
+                  << "," << cheapestFood.second << ")"
+                  << " | carryingFood=" << ant.carryingFood
+                  << std::endl;
+    }
+}
+    std::sort(
+        relayOptions.begin(),
+        relayOptions.end(),
+        [](const RelayAssignment& a,
+           const RelayAssignment& b)
+        {
+            return a.energyAfterPickup > b.energyAfterPickup;
+        }
     );
+
+    if (!relayOptions.empty())
+    {
+        RelayAssignment relay = relayOptions[0];
+
+        Ant& ant = this->ants[relay.antIndex];
+        Coord foodTarget = knownFood[relay.foodIndex];
+
+        std::cout << "\n--- RELAY MODE ---\n";
+        std::cout << "Sacrificing Ant " << relay.antIndex
+                  << " | Energy: " << ant.energy
+                  << " | Target: (" << foodTarget.first
+                  << "," << foodTarget.second << ")"
+                  << " | Cost to food: " << relay.costToFood
+                  << " | Carry energy: " << relay.energyAfterPickup
+                  << std::endl;
+
+        ant.move(
+            this->terrainMap,
+            foodTarget,
+            this->foodMap
+        );
+
+        Coord finalPosition =
+            ant.returnHome(
+                this->terrainMap,
+                this->foodMap
+            );
+        pendingRelayFood = finalPosition;
+        pendingRelay = true;
+
+        std::cout << "Relay ended at: ("
+                  << finalPosition.first << ","
+                  << finalPosition.second << ")"
+                  << std::endl;
+
+        knownFood.erase(
+            knownFood.begin() + relay.foodIndex
+        );
+    }
 }
+
+
+for (int i = static_cast<int>(foodAssigned.size()) - 1; i >= 0; i--)
+{
+    if (foodAssigned[i])
+    {
+        knownFood.erase(knownFood.begin() + i);
+    }
 }
+
+
 }
+
 
 /** You may insert any custom functions below **/
