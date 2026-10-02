@@ -30,6 +30,12 @@ struct RelayAssignment
     int costToFood;
     int energyAfterPickup;
 };
+bool canRelayCleanly(
+    const MapTemplate& terrainMap,
+    Coord foodTarget,
+    Coord home,
+    int energyAfterPickup
+);
 
 
 void AntWorld::forage() {
@@ -51,7 +57,7 @@ for (int i = 0; i< this->ants.size(); i++)
   );
 int rows = this->terrainMap.size();
 int cols = this->terrainMap[0].size();
-int numberOfSearchers = (2 * this->ants.size()) / 3;    // We split the ants into searchers and collectors, this division of labour increases the efficiency of the colony
+int numberOfSearchers = this->ants.size() / 2;    // We split the ants into searchers and collectors, this division of labour increases the efficiency of the colony
 for (int i = 0; i < energyRank.size(); i++)
 {
     if (i < numberOfSearchers)
@@ -235,6 +241,10 @@ if (pendingRelay)
 
     pendingRelay = false;
     // Any ant already carrying food should prioritize returning it home
+
+    std::cout << "Known food after relay update: "
+          << knownFood.size() << std::endl;
+}
 for (int i = 0; i < this->ants.size(); i++)
 {
     if (this->ants[i].carryingFood)
@@ -245,10 +255,6 @@ for (int i = 0; i < this->ants.size(); i++)
         );
     }
 }
-    std::cout << "Known food after relay update: "
-          << knownFood.size() << std::endl;
-}
-
 
 std::vector<FoodAssignment> possibleAssignments;
 
@@ -393,9 +399,14 @@ if (selectedAssignments.empty() && !knownFood.empty())
                 int energyAfterPickup =
                     ant.energy - costToFood;
 
-                // Must have energy left to actually move the food.
-                if (energyAfterPickup > 0)
+                if (!canRelayCleanly(
+                    this->terrainMap,
+                    foodTarget,
+                    this->homeCoordinates,
+                    energyAfterPickup))
                 {
+                    continue;
+                }
                     relayOptions.push_back(
                         {
                             antIndex,
@@ -407,7 +418,7 @@ if (selectedAssignments.empty() && !knownFood.empty())
                 }
             }
         }
-    }
+
 
     if (relayOptions.empty() && forageCycle <= 10)
 {
@@ -489,17 +500,28 @@ if (selectedAssignments.empty() && !knownFood.empty())
                 this->terrainMap,
                 this->foodMap
             );
-        pendingRelayFood = finalPosition;
-        pendingRelay = true;
+        if (ant.energy == 0)
+{
+    // updateWorld() will drop the carried food here
+    pendingRelayFood = finalPosition;
+    pendingRelay = true;
 
-        std::cout << "Relay ended at: ("
-                  << finalPosition.first << ","
-                  << finalPosition.second << ")"
-                  << std::endl;
+    knownFood.erase(
+        knownFood.begin() + relay.foodIndex
+    );
 
-        knownFood.erase(
-            knownFood.begin() + relay.foodIndex
-        );
+    std::cout << "Relay successful. Food will drop at: ("
+              << finalPosition.first << ","
+              << finalPosition.second << ")"
+              << std::endl;
+}
+else
+{
+    std::cout << "Relay stranded ant with "
+              << ant.energy
+              << " energy remaining."
+              << std::endl;
+}
     }
 }
 
@@ -517,3 +539,40 @@ for (int i = static_cast<int>(foodAssigned.size()) - 1; i >= 0; i--)
 
 
 /** You may insert any custom functions below **/
+bool canRelayCleanly(
+    const MapTemplate& terrainMap,
+    Coord foodTarget,
+    Coord home,
+    int energyAfterPickup)
+{
+    std::vector<Coord> path =
+        shortestPath(terrainMap, foodTarget, home);
+
+    int energy = energyAfterPickup;
+
+    for (int i = 1; i < path.size(); i++)
+    {
+        auto [r1, c1] = path[i - 1];
+        auto [r2, c2] = path[i];
+
+        int stepCost =
+            1 + std::abs(
+                terrainMap[r1][c1] -
+                terrainMap[r2][c2]
+            );
+
+        if (stepCost > energy)
+        {
+            return false; // would get stranded
+        }
+
+        energy -= stepCost;
+
+        if (energy == 0)
+        {
+            return true; // will die and drop food here
+        }
+    }
+
+    return false;
+}
