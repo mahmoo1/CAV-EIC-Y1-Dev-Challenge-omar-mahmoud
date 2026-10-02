@@ -3,13 +3,22 @@
 //
 
 #include "../include/antworld.h"
-
+#include <iostream>
 
 /** @brief this is where you as the applicant will make use of the above functions to develop your solution.
  * here are some existing examples of how calling these functions works to help get you started!
  */
-void AntWorld::forage() {
+static bool initialCycle = true;
+static std::vector<int> searchers;
+static std::vector<int> collectors;
+static std::vector<Coord> scanTargets;
+static std::vector<Coord> knownFood;
+static int forageCycle = 0;
 
+
+void AntWorld::forage() {
+if (initialCycle)
+{
 std::vector<std::pair<int, int>> energyRank; //create a vector to store the energies of the ant colony, before sorting them
 for (int i = 0; i< this->ants.size(); i++)
 {
@@ -18,45 +27,53 @@ for (int i = 0; i< this->ants.size(); i++)
   std::sort(
     energyRank.begin(), energyRank.end(), [](const std::pair<int, int>& a, const std::pair<int, int>& b){return a.first > b.first;} //we sort them in descending order of energy starting at the begining of thhe vector and stopping at the end
   );
-int quadrant;
 int rows = this->terrainMap.size();
 int cols = this->terrainMap[0].size();
-if(homeCoordinates.second < cols/2)
+int numberOfSearchers = (2 * this->ants.size()) / 3;    // We split the ants into searchers and collectors, this division of labour increases the efficiency of the colony
+for (int i = 0; i < energyRank.size(); i++)
 {
-    if(homeCoordinates.first < rows/2)
+    if (i < numberOfSearchers)
     {
-        quadrant = 0; //top left
+        searchers.push_back(energyRank[i].second);   
     }
-    else 
+    else
     {
-        quadrant = 1; //bottom left
+        collectors.push_back(energyRank[i].second);
     }
 }
-else 
-{
-    if (homeCoordinates.first < rows/2)
-    {
-        quadrant = 3; //top right
-    }
-    else{quadrant = 2;} //bottom right
-        
-}
+
+
+
 // Get the food scanning radius and calculate the full scan width
 int radius = this->ants[0].foodRadius;
 int scanWidth = 2 * radius + 1;
-
+int rowZones = (rows + scanWidth - 1) / scanWidth;
+int colZones = (cols + scanWidth - 1) / scanWidth;
 
 std::vector<int> scanRows;
 std::vector<int> scanCols;
-// Store  the key row and column positions for scanning the map in the most efficient manner
-for (int row = radius; row < rows; row += scanWidth)
+
+for (int i = 0; i < rowZones; i++)
 {
-    scanRows.push_back(row);
+    int start = i * rows / rowZones;
+    int end = ((i + 1) * rows / rowZones) - 1;
+
+    scanRows.push_back((start + end) / 2);
 }
 
-for (int col = radius; col < cols; col += scanWidth)
+for (int i = 0; i < colZones; i++)
 {
-    scanCols.push_back(col);
+    int start = i * cols / colZones;
+    int end = ((i + 1) * cols / colZones) - 1;
+
+    scanCols.push_back((start + end) / 2);
+}
+for (int row : scanRows)
+{
+    for (int col : scanCols)
+    {
+        scanTargets.push_back({row, col});
+    }
 }
 
 std::vector<std::pair<int, Coord>> targetCosts; 
@@ -88,9 +105,9 @@ std::sort(
     }
 );
 
-for (int i = 0; i < energyRank.size(); i++)
+for (int i = 0; i < searchers.size(); i++)
 {
-    int antIndex = energyRank[i].second;
+    int antIndex = searchers[i];
 
     int targetIndex = i % targetCosts.size();
 
@@ -101,6 +118,187 @@ for (int i = 0; i < energyRank.size(); i++)
         target,
         this->foodMap
     );
+    
+    
+    std::vector<Coord> foundFood =
+    this->ants[antIndex].foodScan(this->foodMap);
+
+    for (Coord food : foundFood)
+{
+    bool alreadyKnown = false;
+
+    for (Coord known : knownFood)
+    {
+        if (food == known)
+        {
+            alreadyKnown = true;
+            break;
+        }
+    }
+
+    if (!alreadyKnown)
+    {
+        knownFood.push_back(food);
+    }
+}
+}
+std::cout << "\n--- AFTER INITIAL DEPLOYMENT ---\n";
+
+for (int i = 0; i < this->ants.size(); i++)
+{
+    std::cout << "Ant " << i
+              << " | Energy: " << this->ants[i].energy;
+
+    bool isSearcher = false;
+
+    for (int searcherIndex : searchers)
+    {
+        if (i == searcherIndex)
+        {
+            isSearcher = true;
+            break;
+        }
+    }
+
+    if (isSearcher)
+        std::cout << " | SEARCHER";
+    else
+        std::cout << " | COLLECTOR";
+
+    std::cout << std::endl;
+}
+
+std::cout << "Known food: "
+          << knownFood.size() << std::endl;
+initialCycle = false;
+return;
+}
+//std::cout << "Known food after initial scan: "
+  //        << knownFood.size() << std::endl;
+
+
+
+forageCycle++;
+
+if (forageCycle <= 5)
+{
+    std::cout << "\n--- FORAGE CYCLE " << forageCycle << " ---\n";
+    std::cout << "Living ants: " << this->ants.size() << std::endl;
+    std::cout << "Known food: " << knownFood.size() << std::endl;
+    std::cout << "Score: " << this->score << std::endl;
+}
+//RETREIVAL SECTION POST INITIALIZATION 
+std::vector<std::pair<int, int>> currentEnergyRank;
+
+for (int i = 0; i < this->ants.size(); i++)
+{
+    currentEnergyRank.push_back(
+        {this->ants[i].energy, i}
+    );
+}
+
+std::sort(
+    currentEnergyRank.begin(),
+    currentEnergyRank.end(),
+    [](const std::pair<int, int>& a,
+       const std::pair<int, int>& b)
+    {
+        return a.first > b.first;
+    }
+);
+
+for (const std::pair<int, int>& rankedAnt : currentEnergyRank)
+{
+    int antIndex = rankedAnt.second;
+    Ant& ant = this->ants[antIndex];
+
+    if (ant.carryingFood)
+{
+    ant.returnHome(
+        this->terrainMap,
+        this->foodMap
+    );
+
+    continue;
+}
+if (knownFood.empty())
+{
+    std::cout << "Known food available: "
+          << knownFood.size() << std::endl;
+    continue;
+}
+int bestFoodIndex = -1;
+int bestCost = -1;
+for (int i = 0; i < knownFood.size(); i++)
+{
+    Coord foodTarget = knownFood[i];
+
+    std::vector<Coord> pathToFood =
+        shortestPath(
+            this->terrainMap,
+            ant.position,
+            foodTarget
+        );
+
+    int costToFood =
+        calculatePathCost(
+            this->terrainMap,
+            pathToFood
+        );
+
+    std::vector<Coord> pathHome =
+        shortestPath(
+            this->terrainMap,
+            foodTarget,
+            this->homeCoordinates
+        );
+
+    int costHome =
+        calculatePathCost(
+            this->terrainMap,
+            pathHome
+        );
+
+    int totalCost = costToFood + costHome;
+
+    if (totalCost <= ant.energy)
+    {
+        if (bestFoodIndex == -1 || totalCost < bestCost)
+        {
+            bestFoodIndex = i;
+            bestCost = totalCost;
+        }
+    }
+}
+if (bestFoodIndex != -1)
+{
+    Coord foodTarget = knownFood[bestFoodIndex];
+
+    if (forageCycle <= 5)
+    {
+        std::cout << "Ant " << antIndex
+                  << " energy=" << ant.energy
+                  << " retrieving (" << foodTarget.first
+                  << "," << foodTarget.second << ")"
+                  << " bestCost=" << bestCost
+                  << std::endl;
+    }
+
+    ant.move(
+        this->terrainMap,
+        foodTarget,
+        this->foodMap
+    );
+
+    ant.returnHome(
+        this->terrainMap,
+        this->foodMap
+    );
+
+    knownFood.erase(
+        knownFood.begin() + bestFoodIndex
+    );
+}
 }
 }
 
