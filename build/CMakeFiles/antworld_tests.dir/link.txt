@@ -1,0 +1,3 @@
+"C:\Program Files\CMake\bin\cmake.exe" -E rm -f CMakeFiles\antworld_tests.dir/objects.a
+C:\msys64\ucrt64\bin\ar.exe qc CMakeFiles\antworld_tests.dir/objects.a @CMakeFiles\antworld_tests.dir\objects1.rsp
+C:\msys64\ucrt64\bin\c++.exe -Wl,--whole-archive CMakeFiles\antworld_tests.dir/objects.a -Wl,--no-whole-archive -o antworld_tests.exe -Wl,--out-implib,libantworld_tests.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles\antworld_tests.dir\linkLibs.rsp
