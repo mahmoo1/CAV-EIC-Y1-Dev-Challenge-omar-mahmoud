@@ -9,6 +9,7 @@
  * here are some existing examples of how calling these functions works to help get you started!
  */
 void AntWorld::forage() {
+
 std::vector<std::pair<int, int>> energyRank; //create a vector to store the energies of the ant colony, before sorting them
 for (int i = 0; i< this->ants.size(); i++)
 {
@@ -39,6 +40,67 @@ else
     }
     else{quadrant = 2;} //bottom right
         
+}
+// Get the food scanning radius and calculate the full scan width
+int radius = this->ants[0].foodRadius;
+int scanWidth = 2 * radius + 1;
+
+
+std::vector<int> scanRows;
+std::vector<int> scanCols;
+// Store  the key row and column positions for scanning the map in the most efficient manner
+for (int row = radius; row < rows; row += scanWidth)
+{
+    scanRows.push_back(row);
+}
+
+for (int col = radius; col < cols; col += scanWidth)
+{
+    scanCols.push_back(col);
+}
+
+std::vector<std::pair<int, Coord>> targetCosts; 
+
+//Now before starting the search we calculate the energy cost of each path so we assign each ant a scan position
+
+for (int row : scanRows)
+{
+    for (int col : scanCols)
+    {
+        Coord target = {row, col};
+
+        std::vector<Coord> path =
+            shortestPath(this->terrainMap, this->homeCoordinates, target);
+
+        int cost = calculatePathCost(this->terrainMap, path);
+
+        targetCosts.push_back({cost, target});
+    }
+}
+
+std::sort(
+    targetCosts.begin(),
+    targetCosts.end(),
+    [](const std::pair<int, Coord>& a,
+       const std::pair<int, Coord>& b)
+    {
+        return a.first > b.first;       //sort the paths the same way we sorted the ants
+    }
+);
+
+for (int i = 0; i < energyRank.size(); i++)
+{
+    int antIndex = energyRank[i].second;
+
+    int targetIndex = i % targetCosts.size();
+
+    Coord target = targetCosts[targetIndex].second;
+
+    this->ants[antIndex].move(
+        this->terrainMap,
+        target,
+        this->foodMap
+    );
 }
 }
 

@@ -54,7 +54,6 @@ public:
 
     std::vector<Ant> ants = {};
     Coord homeCoordinates = Coord(-1, -1);
-
     int score = 0;
 
 private:
